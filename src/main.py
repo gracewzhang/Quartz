@@ -5,6 +5,7 @@ from quartz import Quartz
 
 app = typer.Typer()
 
+
 @app.command()
 def playlist(
     url: str,
