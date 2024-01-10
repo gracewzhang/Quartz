@@ -1,13 +1,20 @@
 import os
 import shutil
 import sys
+import time
 
 import ffmpeg
 import music_tag
 import spotipy
 import wget
 from pytube import Search
+from rich.console import Console
+from rich.prompt import Prompt
 from spotipy.oauth2 import SpotifyClientCredentials
+
+from utils import Color, ms_to_timestamp
+
+cli = Console()
 
 
 class SpotipySong:
@@ -46,7 +53,7 @@ class SpotipySong:
 class Quartz:
     def __init__(self, out_dir: str) -> None:
         self.out_dir = out_dir
-        self.temp_dir = './.temp/'
+        self.temp_dir = './temp/'
         self.__setup_client()
 
     def __setup_client(self) -> None:
@@ -55,8 +62,7 @@ class Quartz:
             os.getenv('QUARTZ_CLIENT_SECRET'),
         )
         if client_id is None or client_secret is None:
-            # TODO: pretty print
-            print('Set quartz info')
+            cli.print(f'{Color.ERROR.value}Set quartz client ID & secret')
             sys.exit(0)
         client_credentials_manager = SpotifyClientCredentials(
             client_id=client_id, client_secret=client_secret
@@ -65,23 +71,24 @@ class Quartz:
             client_credentials_manager=client_credentials_manager
         )
 
-    def process_playlist(self, url: str) -> None:
+    def playlist(self, url: str) -> None:
         sp_playlist = self.client.playlist(url)
-        for song in sp_playlist['tracks']['items']:
-            sp_song = SpotipySong(song['track'])
-            self.process_song(sp_song=sp_song)
+        tracks = sp_playlist['tracks']['items']
+        for idx, track in enumerate(tracks):
+            sp_song = SpotipySong(track['track'])
+            self.process_song(sp_song, idx + 1, len(tracks))
 
-    def process_song(self, url=None, sp_song=None) -> None:
-        if sp_song is None:
-            sp_song = self.get_sp_song(url)
-        print(f'Downloading {sp_song.name}...')
+    def song(self, url: str) -> None:
+        sp_song = self.get_sp_song(url)
+        self.process_song(sp_song, 1, 1)
+
+    def process_song(self, sp_song: SpotipySong, idx: int, total: int) -> None:
+        cli.print(f'{Color.SUCCESS.value}Processing {idx}/{total}')
         downloaded_yt_path = self.download_yt_song(sp_song)
-        print('Converting to m4a...')
-        m4a_path = self.convert_to_m4a(downloaded_yt_path, sp_song)
-        print('Adding tags...')
+        m4a_path = self.trim_and_convert(downloaded_yt_path, sp_song)
         self.tag_m4a_file(m4a_path, sp_song)
         shutil.rmtree(self.temp_dir)
-        print(f'\nSuccessfully saved {m4a_path}')
+        cli.print(f'\n{Color.SUCCESS.value}Successfully saved {m4a_path}')
 
     def get_sp_song(self, url: str) -> SpotipySong:
         sp_song = self.client.track(url)
@@ -89,23 +96,62 @@ class Quartz:
         return sp_song
 
     def download_yt_song(self, sp_song: SpotipySong) -> str:
+        cli.print(f'{Color.SYSTEM.value}Downloading {sp_song.name}...')
         search_query = f'{sp_song.name} by {sp_song.artist} {sp_song.album.name}'
         yt_song = Search(search_query).results[0]
         streams = yt_song.streams.filter(only_audio=True, file_extension='mp4')
         stream = max(streams, key=lambda s: s.filesize)
-        return stream.download(
+        path = stream.download(
             skip_existing=False,
             output_path=self.temp_dir,
         )
+        cli.print(f'{Color.SYSTEM.value}Preliminary file saved to {path}')
+        return path
 
-    def convert_to_m4a(self, in_path: str, sp_song: SpotipySong) -> str:
+    def get_timestamp(
+        self, get_start: bool, min_timestamp: str, max_timestamp: str
+    ) -> str:
+        while True:
+            if get_start:
+                timestamp = Prompt.ask(
+                    f'{Color.SYSTEM.value}Enter start timestamp', default=min_timestamp
+                )
+            else:
+                timestamp = Prompt.ask(
+                    f'{Color.SYSTEM.value}Enter end timestamp', default=max_timestamp
+                )
+            try:
+                time.strptime(timestamp, '%H:%M:%S')
+                if not min_timestamp <= timestamp <= max_timestamp:
+                    raise IndexError
+                break
+            except ValueError:
+                cli.print(
+                    f"{Color.ERROR.value}Enter a valid timestamp in the format 'hh:mm:ss'"
+                )
+            except IndexError:
+                cli.print(
+                    f'{Color.ERROR.value}Provided timestamp is not within the valid range'
+                )
+        return timestamp
+
+    def trim_and_convert(self, in_path: str, sp_song: SpotipySong) -> str:
         out_path = self.out_dir + sp_song.artist + ' - ' + sp_song.name + '.m4a'
         if not os.path.exists(self.out_dir):
             os.mkdir(self.out_dir)
-        ffmpeg.input(in_path).output(out_path, loglevel='quiet').run()
+
+        max_timestamp = ms_to_timestamp(sp_song.duration_ms)
+        start_time = self.get_timestamp(True, '00:00:00', max_timestamp)
+        end_time = self.get_timestamp(False, start_time, max_timestamp)
+
+        cli.print(f'{Color.SYSTEM.value}Trimming and converting to m4a...')
+        ffmpeg.input(in_path).output(
+            out_path, ss=start_time, to=end_time, loglevel='quiet'
+        ).run()
         return out_path
 
     def tag_m4a_file(self, path: str, sp_song: SpotipySong) -> None:
+        cli.print(f'{Color.SYSTEM.value}Adding tags...')
         tags = music_tag.load_file(path)
         tags['tracktitle'] = sp_song.name
         tags['artist'] = sp_song.artist

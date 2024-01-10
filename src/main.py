@@ -14,7 +14,7 @@ def playlist(
     ] = './out/',
 ):
     quartz = Quartz(out_dir)
-    quartz.process_playlist(url)
+    quartz.playlist(url)
 
 
 @app.command()
@@ -25,7 +25,7 @@ def song(
     ] = './out/',
 ):
     quartz = Quartz(out_dir)
-    quartz.process_song(url=url)
+    quartz.song(url)
 
 
 if __name__ == '__main__':
