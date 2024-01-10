@@ -1,12 +1,14 @@
 import os
 import shutil
 import sys
+import time
 
 import ffmpeg
 import music_tag
 import spotipy
 import wget
 from pytube import Search
+from rich.prompt import Prompt
 from spotipy.oauth2 import SpotifyClientCredentials
 
 
@@ -46,7 +48,7 @@ class SpotipySong:
 class Quartz:
     def __init__(self, out_dir: str) -> None:
         self.out_dir = out_dir
-        self.temp_dir = './.temp/'
+        self.temp_dir = './temp/'
         self.__setup_client()
 
     def __setup_client(self) -> None:
@@ -74,11 +76,8 @@ class Quartz:
     def process_song(self, url=None, sp_song=None) -> None:
         if sp_song is None:
             sp_song = self.get_sp_song(url)
-        print(f'Downloading {sp_song.name}...')
         downloaded_yt_path = self.download_yt_song(sp_song)
-        print('Converting to m4a...')
-        m4a_path = self.convert_to_m4a(downloaded_yt_path, sp_song)
-        print('Adding tags...')
+        m4a_path = self.trim_and_convert(downloaded_yt_path, sp_song)
         self.tag_m4a_file(m4a_path, sp_song)
         shutil.rmtree(self.temp_dir)
         print(f'\nSuccessfully saved {m4a_path}')
@@ -89,6 +88,7 @@ class Quartz:
         return sp_song
 
     def download_yt_song(self, sp_song: SpotipySong) -> str:
+        print(f'Downloading {sp_song.name}...')
         search_query = f'{sp_song.name} by {sp_song.artist} {sp_song.album.name}'
         yt_song = Search(search_query).results[0]
         streams = yt_song.streams.filter(only_audio=True, file_extension='mp4')
@@ -98,14 +98,53 @@ class Quartz:
             output_path=self.temp_dir,
         )
 
-    def convert_to_m4a(self, in_path: str, sp_song: SpotipySong) -> str:
+    def get_timestamp(
+        self, get_start: bool, min_timestamp: str, max_timestamp: str
+    ) -> str:
+        while True:
+            if get_start:
+                timestamp = Prompt.ask('Enter start timestamp', default=min_timestamp)
+            else:
+                timestamp = Prompt.ask('Enter end timestamp', default=max_timestamp)
+            try:
+                time.strptime(timestamp, '%H:%M:%S')
+                if not min_timestamp <= timestamp <= max_timestamp:
+                    raise IndexError
+                break
+            except ValueError:
+                print("Enter a valid timestamp in the format 'hh:mm:ss'")
+            except IndexError:
+                print('Provided timestamp is not within the valid range')
+        return timestamp
+
+    def ms_to_timestamp(self, ms: int) -> str:
+        seconds, milliseconds = divmod(ms, 1000)
+        minutes, seconds = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        return '%s:%s:%s' % (
+            str(hours).zfill(2),
+            str(minutes).zfill(2),
+            str(seconds).zfill(2),
+        )
+
+    def trim_and_convert(self, in_path: str, sp_song: SpotipySong) -> str:
         out_path = self.out_dir + sp_song.artist + ' - ' + sp_song.name + '.m4a'
         if not os.path.exists(self.out_dir):
             os.mkdir(self.out_dir)
-        ffmpeg.input(in_path).output(out_path, loglevel='quiet').run()
+
+        print(f'Preliminary file saved to {in_path}')
+        max_timestamp = self.ms_to_timestamp(sp_song.duration_ms)
+        start_time = self.get_timestamp(True, '00:00:00', max_timestamp)
+        end_time = self.get_timestamp(False, start_time, max_timestamp)
+
+        print('Trimming and converting to m4a...')
+        ffmpeg.input(in_path).output(
+            out_path, ss=start_time, to=end_time, loglevel='quiet'
+        ).run()
         return out_path
 
     def tag_m4a_file(self, path: str, sp_song: SpotipySong) -> None:
+        print('Adding tags...')
         tags = music_tag.load_file(path)
         tags['tracktitle'] = sp_song.name
         tags['artist'] = sp_song.artist
