@@ -74,10 +74,14 @@ class Quartz:
     def process_song(self, url=None, sp_song=None) -> None:
         if sp_song is None:
             sp_song = self.get_sp_song(url)
+        print(f'Downloading {sp_song.name}...')
         downloaded_yt_path = self.download_yt_song(sp_song)
+        print('Converting to m4a...')
         m4a_path = self.convert_to_m4a(downloaded_yt_path, sp_song)
+        print('Adding tags...')
         self.tag_m4a_file(m4a_path, sp_song)
         shutil.rmtree(self.temp_dir)
+        print(f'\nSuccessfully saved {m4a_path}')
 
     def get_sp_song(self, url: str) -> SpotipySong:
         sp_song = self.client.track(url)
@@ -95,12 +99,10 @@ class Quartz:
         )
 
     def convert_to_m4a(self, in_path: str, sp_song: SpotipySong) -> str:
-        out_path = (
-            self.out_dir + sp_song.artist + ' - ' + sp_song.name + '.m4a'
-        )
+        out_path = self.out_dir + sp_song.artist + ' - ' + sp_song.name + '.m4a'
         if not os.path.exists(self.out_dir):
             os.mkdir(self.out_dir)
-        ffmpeg.input(in_path).output(out_path).run()
+        ffmpeg.input(in_path).output(out_path, loglevel='quiet').run()
         return out_path
 
     def tag_m4a_file(self, path: str, sp_song: SpotipySong) -> None:
