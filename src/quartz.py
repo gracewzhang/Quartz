@@ -1,7 +1,11 @@
 import os
 import sys
 
+import ffmpeg
+import music_tag
+import shutil
 import spotipy
+import wget
 from pytube import Search
 from spotipy.oauth2 import SpotifyClientCredentials
 
@@ -10,7 +14,7 @@ class SpotipySong:
     def __init__(self, song: dict) -> None:
         self.name = song['name']
         self.duration_ms = song['duration_ms']
-        self.artists = [artist['name'] for artist in song['artists']]
+        self.artist = ', '.join([artist['name'] for artist in song['artists']])
         self.track_no = song['disc_number']
         self.album = self.SpotipyAlbum(song['album'])
 
@@ -33,7 +37,7 @@ class SpotipySong:
         return (
             f'name: {self.name}\n'
             f'duration_ms: {self.duration_ms}\n'
-            f'artists: {self.artists}\n'
+            f'artist: {self.artist}\n'
             f'track_no: {self.track_no}\n'
             f'{self.album}'
         )
@@ -42,6 +46,7 @@ class SpotipySong:
 class Quartz:
     def __init__(self, out_dir: str) -> None:
         self.out_dir = out_dir
+        self.temp_dir = './.temp/'
         self.__setup_client()
 
     def __setup_client(self) -> None:
@@ -64,17 +69,50 @@ class Quartz:
         pass
 
     def process_song(self, url: str) -> None:
-        self.get_sp_song(url)
-        pass
+        sp_song = self.get_sp_song(url)
+        downloaded_yt_path = self.download_yt_song(sp_song)
+        m4a_path = self.convert_to_m4a(downloaded_yt_path, sp_song)
+        self.tag_m4a_file(m4a_path, sp_song)
+        shutil.rmtree(self.temp_dir)
 
-    def get_sp_song(self, url):
+    def get_sp_song(self, url: str) -> SpotipySong:
         sp_song = self.client.track(url)
         sp_song = SpotipySong(sp_song)
-        self.download_yt_song(sp_song)
+        return sp_song
 
-    def download_yt_song(self, sp_song):
-        search_query = f'{sp_song.name} by {sp_song.artists[0]} {sp_song.album.name}'
-        search_res = Search(search_query).results
-        print(search_res)
+    def download_yt_song(self, sp_song: SpotipySong) -> str:
+        search_query = f'{sp_song.name} by {sp_song.artist} {sp_song.album.name}'
+        yt_song = Search(search_query).results[0]
+        streams = yt_song.streams.filter(only_audio=True, file_extension='mp4')
+        stream = max(streams, key=lambda s: s.filesize)
+        return stream.download(
+            skip_existing=False,
+            output_path=self.temp_dir,
+        )
 
-        pass
+    def convert_to_m4a(self, in_path: str, sp_song: SpotipySong) -> str:
+        out_path = (
+            self.out_dir + sp_song.artist + ' - ' + sp_song.name + '.m4a'
+        )
+        if not os.path.exists(self.out_dir):
+            os.mkdir(self.out_dir)
+        ffmpeg.input(in_path).output(out_path).run()
+        return out_path
+
+    def tag_m4a_file(self, path: str, sp_song: SpotipySong) -> None:
+        tags = music_tag.load_file(path)
+        tags['tracktitle'] = sp_song.name
+        tags['artist'] = sp_song.artist
+        tags['album'] = sp_song.album.name
+        tags['tracknumber'] = sp_song.track_no
+        tags['totaltracks'] = sp_song.album.total_tracks
+        tags['year'] = sp_song.album.release_year
+        album_cover_path = self.download_album_cover(sp_song.album.cover, sp_song.name)
+        with open(album_cover_path, 'rb') as img_in:
+            tags['artwork'] = img_in.read()
+        tags.save()
+
+    def download_album_cover(self, cover_url: str, song_name: str) -> str:
+        album_cover_path = self.temp_dir + song_name + '.png'
+        wget.download(cover_url, out=album_cover_path)
+        return album_cover_path
