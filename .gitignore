@@ -1,4 +1,5 @@
 roadmap.md
+src/out/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
