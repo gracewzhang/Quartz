@@ -25,7 +25,7 @@ def song(
     ] = './out/',
 ):
     quartz = Quartz(out_dir)
-    quartz.process_song(url)
+    quartz.process_song(url=url)
 
 
 if __name__ == '__main__':

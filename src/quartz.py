@@ -1,9 +1,9 @@
 import os
+import shutil
 import sys
 
 import ffmpeg
 import music_tag
-import shutil
 import spotipy
 import wget
 from pytube import Search
@@ -66,10 +66,14 @@ class Quartz:
         )
 
     def process_playlist(self, url: str) -> None:
-        pass
+        sp_playlist = self.client.playlist(url)
+        for song in sp_playlist['tracks']['items']:
+            sp_song = SpotipySong(song['track'])
+            self.process_song(sp_song=sp_song)
 
-    def process_song(self, url: str) -> None:
-        sp_song = self.get_sp_song(url)
+    def process_song(self, url=None, sp_song=None) -> None:
+        if sp_song is None:
+            sp_song = self.get_sp_song(url)
         downloaded_yt_path = self.download_yt_song(sp_song)
         m4a_path = self.convert_to_m4a(downloaded_yt_path, sp_song)
         self.tag_m4a_file(m4a_path, sp_song)
