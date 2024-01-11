@@ -1,0 +1,10 @@
+ffmpeg-python==0.2.0
+music-tag==0.4.3
+pillow==10.2.0
+pytube==15.0.0
+rich==13.7.0
+spotipy==2.23.0
+typer==0.9.0
+typing-inspect==0.9.0
+typing_extensions==4.8.0
+wget==3.2
